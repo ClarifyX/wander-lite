@@ -1,0 +1,207 @@
+轻漫游 需求增量 1.0.3
+发布跑通：Git 版本管理 + GitHub 公开仓 + Vercel 公网链接 + 微后台藏 Key
+================================================
+
+给研发 AI 的执行说明书。产品交互仍以 1.0.1 / 1.0.2 为准。本文件只管：上线、版本、Key 不进前端/仓库。
+
+当前账号（已验证，不要换成别的）：
+  GitHub MCP 登录：ClarifyX  https://github.com/ClarifyX
+  仓库名：wander-lite
+  公开仓库：https://github.com/ClarifyX/wander-lite
+  Vercel MCP：已授权。list_teams 可能为空（个人 Hobby），不要卡死。
+
+
+0. 先回答产品负责人那三句
+--------------------------
+1. 代码上 GitHub，公网能打开 Vercel 链接：要做，且本文件就是任务。
+2. 用 git 管理版本：要做。以后改代码 = commit + push，Vercel 跟 main 自动再发。
+3. Vercel 微后台保证 API Key 不泄漏：
+   - 能保证：Key 不出现在 Git、不写进前端 JS、不进 localStorage、不打进日志。
+   - 不能保证：把站长自己的 DeepSeek Key 放进 Vercel 环境变量后，全世界访问这个 Demo 都会消耗站长额度。这叫「藏 Key」，不是「防白嫖」。
+   - 因此微后台必须：服务端持有 Key + 基础限流 + 前端不再强制访客填 Key。访客仍可填自己的 Key（走同一接口时用访客 Key，不碰站长 Key）。
+
+
+1. 完成定义（全勾才算跑通）
+--------------------------
+- 本地 git：main 上有清晰 commit，.env 与真实 Key 从未入库
+- GitHub 公开仓 ClarifyX/wander-lite 有代码，可用 git clone / git push
+- Vercel 生产 URL 能打开 PWA（地图 + 抽屉）
+- 公网打开后：不填 Key 也能对话（走 Vercel /api/chat，用环境变量里的 DeepSeek Key）
+- 浏览器 Network 里请求打到同源 /api/chat，看不到 DeepSeek 官方域名上的站长 Authorization
+- 仓库全文搜不到 sk- 真实 Key
+- README 写明：仓库地址、Vercel 地址、如何 git 协作、Key 放在 Vercel Env 不进 Git
+
+
+2. 安全设计（必须按此实现）
+--------------------------
+新增 Vercel Serverless：
+
+  /api/health   GET   { ok: true, serverKey: boolean }
+  /api/chat     POST  转发 DeepSeek Chat Completions
+
+行为：
+
+  A. 请求带 Authorization: Bearer sk-...（访客自己的 Key）
+     → 用访客 Key 调 DeepSeek，忽略服务端 Key。
+  B. 请求不带 Bearer，但 Vercel Env 有 DEEPSEEK_API_KEY
+     → 用服务端 Key。这是公网 Demo 的主路径。
+  C. 两者都没有 → 401，JSON { error: { message: "未配置模型 Key" } }
+
+硬性禁止：
+
+  - Key 写入代码、README、commit、前端常量
+  - console.log / 响应里回显 Key 或 Authorization
+  - 把整个 DeepSeek 报错原文里的 Key 传回浏览器（若有则打码）
+  - 公共 CORS 代理
+  - 把 DEEPSEEK_API_KEY 写进 vercel.json
+
+限流（防把「藏 Key」变成免费代理）：
+
+  - 只允许 POST JSON；body 上限约 200KB
+  - max_tokens 服务端封顶 4096，模型白名单：deepseek-chat / deepseek-reasoner
+  - 按 IP 粗限流：同一 IP 10 分钟内最多 20 次（内存 Map 即可，Demo 足够；实例重启清零可接受）
+  - 超限 429
+
+CORS：函数与静态站同源，不必对全世界开 *。若要预检，只允许本站 Origin。
+
+
+3. 前端改动（小，保持 1.0.2 UI）
+--------------------------------
+js/deepseek.js：
+
+  1. GET /api/health
+     - ok 且 serverKey=true：hasServerKey=true，发送对话不再要求用户填 Key
+     - ok 但 serverKey=false：保持现状，必须用户 Key（本地 server.py 仍可转访客 Key）
+     - health 失败：再尝试直连官方 URL（仅当用户填了 Key；公网 Vercel 不应走到这）
+
+  2. POST /api/chat
+     - 有用户 Key：带 Authorization
+     - 只有服务端 Key：不带 Authorization
+
+  3. UI：health.serverKey=true 时，设置里说明
+     「公网 Demo 已接服务端代理，可不填 Key。填了则用你自己的额度。」
+
+本地 python3 server.py 的 /api/health 也要返回 { ok:true, serverKey:false }，以免本地误以为有站长 Key。
+
+
+4. 微后台文件
+--------------
+新增（Node，Vercel 原生，不要上 Next/打包器）：
+
+  api/health.js
+  api/chat.js
+
+vercel.json 补 functions 不必复杂。保持静态资源 + /api/* 自动当 Serverless。
+framework：Other / 纯静态。不要乱填 Next.js。
+
+DEEPSEEK_API_KEY 只存在 Vercel 项目 Environment Variables（Production + Preview）。
+研发 AI **不要**在对话里让用户把 Key 贴进聊天记录；引导用户去 Vercel Dashboard → Project → Settings → Environment Variables 自己粘贴。粘贴后 Redeploy 一次。
+
+
+5. Git 版本管理（本机仓库）
+--------------------------
+现状：已有 .git，但还没有 commit，也没有 remote。
+
+做：
+
+  1. 确认 .gitignore 含 .env .env.local node_modules .vercel
+  2. 全文确认没有 sk- 真实 Key 再 add
+  3. 不要提交：.env、Cursor 本地配置、真实 Key、超大参考图
+  4. 可以提交：代码、需求文档、README、api/、vercel.json
+  5. 第一次 commit 信息示例：
+     「Add wander-lite PWA and Vercel API proxy.」
+  6. 分支 main
+  7. 以后改一版就 commit 一次，message 写原因
+
+若 git commit 因 user.name / user.email 失败：不要改全局 git config。用本仓库 local config，或请用户在终端自己设。禁止把 Key 写进 config。
+
+
+6. GitHub（用已通的 GitHub MCP）
+--------------------------------
+  1. 先 search / 看 ClarifyX 是否已有 wander-lite，有则不要重复创建，改用现仓
+  2. 没有则 create_repository：
+       name: wander-lite
+       private: false
+       autoInit: false   （已有本地文件，不要再生成 README 造成冲突）
+       不要填 organization（落到 ClarifyX 个人账号）
+  3. 本地：
+       git remote add origin https://github.com/ClarifyX/wander-lite.git
+       git push -u origin main
+     若 HTTPS 要登录，优先用已有凭据；不要把 PAT 写进 remote URL 再提交进 Git
+  4. 推完用 GitHub MCP 读仓库确认文件在
+
+push_files 仅作 git push 失败时的备选（文件多，容易漏）。首选 git push，这样以后版本管理才正常。
+
+
+7. Vercel 公网
+--------------
+目标：生产 URL，例如 https://wander-lite.vercel.app（以控制台实际域名为准）
+
+顺序：
+
+  A. 优先 Git 联动（以后 push 即发布）
+     Vercel MCP create_git_project
+       repo: ClarifyX/wander-lite
+       provider: github
+       projectName: wander-lite
+       deploy: true
+     teamId：先 list_teams。有 team 就填。空数组则：
+       - 尝试不传 / 用个人账号常见 slug
+       - 仍失败则走 B，并在 README 写「请在 Vercel Import GitHub 仓库 ClarifyX/wander-lite」
+     Vercel 账号必须已连接 GitHub 且能读 ClarifyX/wander-lite。
+
+  B. 备选：deploy_to_vercel 直接传文件树打一版 production
+     这能马上有公网链接，但不会自动跟 git。完成后仍要尽量补 A。
+
+环境变量：
+
+  创建项目后，提醒用户（不要代贴 Key）：
+  Vercel → 该项目 → Settings → Environment Variables
+  Name: DEEPSEEK_API_KEY
+  Value: 用户自己的 DeepSeek Key
+  勾选 Production、Preview
+  Save 后 Redeploy
+
+没有这个 Env 时：公网页只能加载示例路线，对话会提示未配置 Key（或让访客自填）。
+
+
+8. README 要改的话
+------------------
+增加醒目一节：
+
+  在线 Demo：https://……
+  源码：https://github.com/ClarifyX/wander-lite
+  公网对话走 Vercel /api/chat，站长 Key 在 Vercel Env，不在仓库。
+  克隆后开发：git clone → python3 server.py → 自备 Key
+  发布：改完 git add / commit / push，Vercel 自动部署
+
+
+9. 验收（研发 AI 自己点）
+------------------------
+- git log 有 commit；git remote -v 指向 ClarifyX/wander-lite
+- 浏览器打开 GitHub 仓，能看到 index.html 与 api/
+- 打开 Vercel 生产 URL：地图可拖，抽屉三档，四周留缝
+- 不填 Key 能发出一条对话（前提是用户已在 Vercel 配 Env；若用户还没配，在回复里写清「公网仓已好，等你在 Vercel 粘贴 DEEPSEEK_API_KEY 并 Redeploy」）
+- Network：/api/chat 同源，无 api.deepseek.com 的站长 Bearer
+- git grep 或仓库搜索 sk- 无真实 Key
+
+
+10. 不要做
+----------
+- 不要把 GitHub Pages 当主 Demo（无 Serverless，藏不了 Key）
+- 不要登录系统、数据库、付费墙（超出微后台）
+- 不要 force push、不要改全局 git config
+- 不要在聊天里回显用户或站长的 Key
+- 不要擅自扩大到组织 ClarifyX org（仓库建在用户 ClarifyX 个人账号）
+
+
+11. 执行顺序（严格）
+--------------------
+1. 写 api/health.js、api/chat.js，改 js/deepseek.js 与本地 server.py health
+2. 本地 python3 server.py 确认旧路径没坏（用户 Key 仍可用）
+3. git add / commit（无 Key）
+4. GitHub 建仓 + push
+5. Vercel 连仓库并部署，拿到公网 URL
+6. 请用户自己配 DEEPSEEK_API_KEY 并 Redeploy
+7. 改 README，再 commit push
+8. 把 GitHub URL、Vercel URL 回复给用户
