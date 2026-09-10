@@ -1,0 +1,173 @@
+轻漫游 需求增量 1.0.2
+DeepSeek API + 苹果式四周留缝悬浮抽屉
+================================================
+
+生效：本文件覆盖 1.0.1 的两处：
+  1) 大模型从 Claude 改为 DeepSeek
+  2) 底部抽屉从「贴屏幕底边」改为「四周与屏幕有间隙的悬浮卡片」
+
+其余继承 1.0.1（全屏 Carto 浅灰地图、三档吸附、ChatGPT 对话条、四阶段、JSON 闸门）。
+实现时：先读 1.0.1.txt，再用本文件覆盖。本文件与 1.0.1 冲突时，以 1.0.2 为准。
+
+
+1. 相对 1.0.1 改了什么
+----------------------
+模型：页面填 DeepSeek API Key，调 DeepSeek Chat Completions（OpenAI 兼容）。
+      禁止再接 Anthropic / Claude，不要 js/claude.js，不要 anthropic-* 请求头。
+
+抽屉：苹果地图参考图那种——卡片浮在地图上，左、右、下（拉满时连上）都能看见一圈地图，
+      四角都是大圆角，不是贴边的全宽底板。
+
+
+2. DeepSeek API（阶段 3）
+------------------------
+Key：
+  - 输入框 placeholder：`sk-...`（DeepSeek 控制台创建的 Key）
+  - 只进内存，刷新丢失，禁止 localStorage / 写进代码 / 提交 Git
+  - UI 文案改成「DeepSeek API Key」，不要写 Claude / Anthropic / sk-ant
+
+文件：`js/deepseek.js`（不要 claude.js）
+
+接口：
+
+  POST https://api.deepseek.com/chat/completions
+  Content-Type: application/json
+  Authorization: Bearer <用户输入的 Key>
+
+  {
+    "model": "deepseek-chat",
+    "max_tokens": 4096,
+    "temperature": 0.7,
+    "messages": [
+      { "role": "system", "content": "<02 人设 + 08 JSON 契约>" },
+      { "role": "user", "content": "..." },
+      { "role": "assistant", "content": "..." }
+    ]
+  }
+
+默认模型 `deepseek-chat`，设置里允许改成 `deepseek-reasoner`。
+从响应取：`choices[0].message.content`（字符串）。
+HTTP 非 2xx：把 status 和 `error.message` 显示在对话里。
+
+system / 追问 / 抽 JSON / 确认闸门：仍按 `02` `06` `08`。只换供应商，不换产品协议。
+
+CORS（必须写进 README，不要假装没有）：
+  DeepSeek 官方接口通常不允许浏览器跨域。
+  1) 先直连上述 URL（实现简单，Pages 上可能失败）。
+  2) 直连失败则用极简同源反代：`server.py` 只转发
+     浏览器 POST `/api/chat` → `https://api.deepseek.com/chat/completions`
+     Authorization 原样传递，服务端不存 Key、不打日志。
+  3) 前端：有同源 `/api/chat` 就走代理，否则走官方 URL。
+  4) GitHub Pages：无 Key 仍可看地图 + 示例路线；对话若被 CORS 拦住，
+     README 写「请本机 python3 server.py 后打开，再填 DeepSeek Key」。
+  禁止用公共 CORS 代理转发 Key。
+
+
+3. 悬浮抽屉（所有三档都四周留缝）
+--------------------------------
+名字仍叫 Bottom Sheet。视觉参考苹果地图：一块毛玻璃卡片浮在地图上，
+屏幕边缘能看到一圈浅灰地图，而不是抽屉左右贴死、底边贴 Home 条。
+
+间距 token（强制量级，可微调 2px）：
+
+  --sheet-gap: 10px;
+  实际：
+    left   = 10px
+    right  = 10px
+    bottom = max(10px, env(safe-area-inset-bottom))
+    top（仅 expanded）= max(10px, env(safe-area-inset-top))
+
+形状：
+  - 四角圆角 24～28px（上下左右都圆，因为四周都透空）
+  - 不要只圆上方、下方做成直角贴边
+  - 毛玻璃 + 轻阴影，同 1.0.1 色板
+  - 卡片本身不要 100vw
+
+三档高度（高度是卡片高度，外面已经扣掉 gap）：
+
+  collapsed  页面 3
+    卡片高度 ≈ 72～88px（拖拽条 + 输入条）
+    左右下有缝；上方大片地图
+
+  half       页面 1（默认）
+    卡片高度 ≈ 48% × (100dvh - bottom gap)
+    左右下有缝；上方露出地图
+
+  expanded   页面 2
+    卡片 top/left/right/bottom 都有缝
+    看起来像浮在地图正中的圆角窗口，四边都能瞥见地图
+    height ≈ 100dvh - top gap - bottom gap
+
+宽屏 > 768px：
+  卡片 max-width: 480px
+  水平居中，或靠左并保留 --sheet-gap
+  仍然四周留缝，不要拉满桌面宽度
+
+禁止：
+  - left:0; right:0; bottom:0 的全宽贴边抽屉
+  - collapsed 用全宽底栏、half 才留缝（三档必须同一套悬浮卡片）
+  - 为了留缝把地图缩进（地图仍是 100vw×100vh，缝是「看见抽屉后面的地图」）
+
+
+4. 结构示意（页面 1 / half）
+----------------------------
+┌──────────────────────────────────────┐
+│                                      │
+│            全屏浅灰地图               │
+│                          [定位浮钮]  │  ← 浮钮也离开屏幕右、下，
+│                                      │     坐在抽屉上方的空隙里
+│   ╭──────────────────────────────╮   │
+│   │          ── 拖拽条           │   │  ← 左右各约 10px 地图缝
+│   │     对话（GPT 风格）         │   │
+│   │  [+]  说说你想怎么逛…  [发]  │   │
+│   ╰──────────────────────────────╯   │
+│        ↑ 底缝（含安全区）            │
+└──────────────────────────────────────┘
+
+页面 3：同一张卡片压得很扁，仍四角圆、仍四周有缝，像悬浮搜索条。
+页面 2：卡片几乎铺满，但四边仍露出地图细框。
+
+
+5. 跟手与安全区
+----------------
+吸附、发送后弹回 half、collapsed 可输入：同 1.0.1。
+键盘弹起：卡片 bottom 贴在键盘上方，左右缝保持，不要突然变成贴边全宽。
+fitBounds padding：
+  paddingBottom = 卡片高度 + bottom gap
+  paddingLeft / paddingRight = sheet gap（或卡片水平偏移）
+  expanded 时 paddingTop 也要加
+浮钮：right = 10px + 4px，bottom = 卡片顶部再 + 12px，不要压进卡片，也不要贴屏幕死角。
+
+
+6. 文案替换清单
+----------------
+Claude API Key        → DeepSeek API Key
+sk-ant-...            → sk-...
+claude-sonnet-...     → deepseek-chat
+Anthropic / Messages  → DeepSeek Chat Completions
+「已画到右侧地图」     → 「已画到地图」（1.0.1 已改，保持）
+
+
+7. 阶段验收增量（在 1.0.1 / 10 清单上追加）
+------------------------------------------
+阶段 1：
+  - 抽屉四边（collapsed/half 至少左、右、下）能看见地图缝
+  - 四角大圆角，不是贴底直角板
+  - 无 DeepSeek 请求
+
+阶段 3：
+  - 请求打到 api.deepseek.com 或同源 /api/chat
+  - Header 是 Authorization: Bearer
+  - 仓库搜不到真实 Key；不要残留 api.anthropic.com
+  - 刷新后 Key 消失
+
+阶段 4：
+  - README 写：自备 DeepSeek Key；Pages 上 CORS 限制与本地 server.py 用法
+
+
+8. 明确不要
+------------
+  - 继续接 Claude
+  - 贴边全宽 Bottom Sheet
+  - 公共 CORS 代理
+  - 把 DeepSeek Key 写进 server.py 默认值
