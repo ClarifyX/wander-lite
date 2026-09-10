@@ -1,0 +1,258 @@
+轻漫游 需求规格 1.1.0
+规范工作方式：Git 版本 = 需求编号；GitHub + Vercel 公网；Edge 微后台藏 Key；联调
+================================================
+
+本文档是 **1.1.0** 工作方式与联调的真源。
+UI / 抽屉 / 浅灰底图仍继承 1.0.1、1.0.2。
+发布与藏 Key 在 1.0.3 已起草稿，**冲突时以 1.1.0 为准**（尤其：Git 打 tag、Edge 运行时、限流 30/IP/天 且 全站 200/天、三态对话联调）。
+
+GitHub：ClarifyX / wander-lite（公开）https://github.com/ClarifyX/wander-lite
+Vercel：生产域名公网可开，任意用户不用翻墙工具即可访问（中国大陆网络视运营商而定，产品侧按公网 HTTPS 验收）。
+
+禁止把任何真实 API Key 写进本文件、代码、README、commit、聊天回复。
+用户已在对话里提供 DeepSeek Key：实现时只写入 **本机/.env（gitignore）** 和 **Vercel Environment Variables 的 DEEPSEEK_API_KEY**，然后用它做真实联调。写完 Env 后建议用户去 DeepSeek 控制台轮换 Key（Key 已出现在聊天记录里）。
+
+
+0. 1.1.0 要交付什么
+--------------------
+1. 工作方式：需求文档版本号与 git 版本号对齐，可 tag、可回滚。
+2. PWA 发布到 GitHub 源码仓 + Vercel 公网 URL，任意用户可打开。
+3. Vercel Edge 微后台转发 DeepSeek，Key 不进前端；限流 每 IP 每天 30 次，全站每天 200 次。
+4. 用真实 DeepSeek Key 做联调：三态意图、JSON 约束、解析容错、人机闸门、地图校验、接口错误友好提示。
+
+
+1. 工作方式：需求编号 = Git 版本号
+----------------------------------
+规则：
+
+  需求文档叫 1.1.0  →  git tag 必须是 v1.1.0
+  以后 1.1.1 / 1.2.0 同理，先改需求文档再打同号 tag。
+  不要用随便的 commit message 代替版本号。
+
+本仓库落地步骤：
+
+  1. 完成本文件列出的代码与联调
+  2. git add 该提交的源码（无 .env、无 Key）
+  3. commit message 第一行带版本，例如：
+       Release v1.1.0: git tags, public Vercel, Edge proxy, dialogue states.
+  4. git tag -a v1.1.0 -m "wander-lite 1.1.0"
+  5. git push origin main
+  6. git push origin v1.1.0
+
+回滚（必须可做，验收时写进 README）：
+
+  查看版本：git tag -l
+  回到 1.1.0 代码：git checkout v1.1.0
+  需要 main 也退回去：git revert 或在征得用户同意后基于 tag 开修复分支，**禁止未允许的 force push**
+
+main 上每个需求版本至少对应一个 annotated tag。Vercel 生产跟 main；可用 tag 在 Vercel 上建预览对照。
+
+分支习惯（从 1.1.0 起）：
+
+  main          可发布
+  改需求时先本地提交，再 push，再打 tag
+  不要在 tag 上直接继续堆无版本号的大改
+
+
+2. 公网发布：GitHub + Vercel
+----------------------------
+源码：GitHub 公开仓 ClarifyX/wander-lite，git clone / git push 正常。
+访问：Vercel Production HTTPS，不登录也能打开 PWA（地图 + 抽屉 + 对话）。
+任意用户：分享 Vercel URL 即可；不要求安装 App。PWA 仍可「添加到主屏幕」。
+
+顺序：先有 main 上的 commit → push GitHub → Vercel 连该仓自动部署（create_git_project 或用户已 Import）。
+GitHub Pages 不是 1.1.0 主入口（没有 Edge 函数藏不了 Key）。
+
+README 必须写：GitHub 地址、Vercel 地址、如何 checkout tag 回滚、Key 只在 Vercel Env。
+
+
+3. Edge 微后台 + 限流 + 真实 Key 联调
+------------------------------------
+运行时：**Vercel Edge Function**（不是 Node Serverless 作为主路径）。
+前端只请求同源：
+
+  GET  /api/health
+  POST /api/chat     Content-Type: application/json
+  超时：前端 AbortController 25s；超时展示「模型响应超时，请重试」
+
+health 返回：
+  { ok: true, serverKey: true|false, version: "1.1.0" }
+
+chat 请求体：
+  { messages, model?, intent? }
+  intent 可选：collect | generate | revise（前端按第 4 节传入，后端写入 system 约束）
+
+鉴权：
+
+  - 服务端用 Env DEEPSEEK_API_KEY 调 https://api.deepseek.com/chat/completions
+  - 浏览器不得带站长 Key。Network 里不应出现 api.deepseek.com 的站长 Bearer
+  - 访客若自己在设置里填了 Key：可带 Authorization: Bearer <访客Key>，此时不消耗站长 Key，但仍计入限流
+  - 无服务端 Key 且无访客 Key：401，文案「模型暂未配置」
+
+限流（必须跨实例，禁止只靠内存 Map）：
+
+  维度一：每 IP 每个自然日（UTC+8）最多 30 次成功或失败都计次的 POST /api/chat
+  维度二：全站每个自然日最多 200 次
+  超限：429
+    IP 超限：「今日该网络试用次数已用完（30次），明天再来或填自己的 DeepSeek Key。」
+    全站超限：「今日 Demo 总次数已满（200次），请明日再试或使用自己的 Key。」
+  访客自带 Key 的请求：仍计 IP 次数，可不计全站 200（避免一个人填 Key 把 Demo 打爆；IP 30 仍在）
+  存储：Vercel KV 或 Upstash Redis。键例如：
+    rl:ip:{ip}:{yyyy-mm-dd}
+    rl:all:{yyyy-mm-dd}
+  实现 Agent 负责创建并绑定 KV，Token 只放 Vercel Env，不进 Git。
+
+模型：
+
+  默认 deepseek-chat，允许 deepseek-reasoner
+  max_tokens 封顶 4096，body 上限 200KB
+  上游非 2xx：把简短 error.message 转成前端可读中文，不要把 Key 带回去
+
+本地 python3 server.py：继续提供 /api/health、/api/chat 便于无 Vercel 时开发；限流在本地可放宽或同样 30，但标注「以 Vercel 为准」。
+
+
+4. 联调重点：对话三态与意图
+--------------------------
+前端维护明确状态机（不要只靠模型自觉），三态：
+
+  collect   收集偏好
+  generate  生成路线
+  revise    修改路线
+
+转换：
+
+  进入对话 → collect
+  核心槽位齐（城市、方式、时长、起点片区，同 02 文档）且用户没有否定 → 下一次请求 intent=generate
+  已有预览或已确认路线，用户说「太长 / 更安静 / 换一条 / 加点咖啡」→ revise
+  用户说「重新说 / 换个城市」且推翻核心槽位 → 回到 collect，丢掉未确认草稿
+
+收集偏好 collect：
+
+  信息不足：主动追问，一次最多 2 问，禁止输出路线 JSON
+  需求矛盾：例如「只要步行」又「骑行 30 公里」、「1 小时」又「跨三个区狂奔」、
+            「必须去外滩」又「避开所有网红」
+            → 用白话指出矛盾，请用户选一边，**不强行 generate**
+  用户要长途多日机票酒店 → 拒绝并拉回短途，保持 collect
+
+生成路线 generate：
+
+  仅此分支允许模型输出 ```json ... ``` 路线块（协议见 08）
+  自然语言里先 2～4 句说明，然后唯一一个 json 围栏
+  闲聊、追问、解释矛盾时禁止 JSON；前端若在 collect 态抽到 JSON → 丢弃并当错误提示「还在收集偏好，未生成路线」
+
+修改路线 revise：
+
+  带上上一轮路线标题与点名
+  输出新的唯一 json 围栏
+  未确认前地图仍显示旧的已确认路线（或空）
+
+
+5. LLM 结构化输出约束
+----------------------
+system + 当次 intent 指令必须写清：
+
+  intent=collect  → 禁止任何 JSON 代码块
+  intent=generate / revise → 必须且只能有一个 ```json 代码块，字段符合 08
+  矛盾未解决 → 视为 collect，禁止 JSON
+
+JSON 字段与 08 一致（lat / lng，不要 lon 作为唯一字段名；若模型写 lon 前端可兼容映射到 lng）。
+
+
+6. 前端 JSON 容错
+------------------
+parse-route.js：
+
+  1. 正则取最后一个 ```json 或 ``` 围栏
+  2. 没有围栏再尝试第一个 { 到最后一个 }
+  3. JSON.parse try/catch
+  4. 校验 stops、name、lat/lng 为有限数字（Number.isFinite）
+  5. 失败：聊天提示「路线数据解析失败，请点重新生成」，不渲染地图，状态可留在 generate/revise
+
+禁止解析失败时静默。
+
+
+7. 人机闸门
+------------
+LLM 产出合法 JSON 后：
+
+  只展示预览卡
+  按钮文案：**确认路线**、**重新生成**
+  未点确认路线 → 不得 renderRoute
+  确认路线 → 才画地图
+  重新生成 → 带同一 intent=generate 或 revise 再请求，未确认前地图不变
+
+不要自动渲染。不要一返回 JSON 就上图。
+
+
+8. 地图渲染校验
+----------------
+renderRoute 之前：
+
+  每个 stop.lat / stop.lng（或 lon）必须是数字且非 NaN
+  中国范围粗检：lat 18～53，lng 73～135，失败则整条路线拒绘并提示
+  先 clearRoute()：去掉全部 marker 与 polyline，再画新的
+  禁止叠加两套图层
+  fitBounds 加当前抽屉高度 padding
+
+
+9. 后端联调与前端错误
+----------------------
+前端 POST 只打到 Vercel 同源 /api/chat（生产）或本地 server.py。
+
+必须捕获并展示：
+
+  网络失败 / CORS     「网络异常，请稍后重试」
+  超时                「模型响应超时，请重试」
+  401                 「模型未配置或 Key 无效」
+  429                 用后端返回的中文
+  4xx/5xx 模型错误    「生成失败：」+ 短原因
+  JSON 解析失败       「路线数据解析失败，请重新生成」
+
+busy 时禁用发送。不要把 stack / Key 展示出来。
+
+
+10. 真实 Key 联调清单（研发必须自己走一遍）
+------------------------------------------
+用 Vercel Env 或本地 .env 的 DeepSeek Key（用户提供的那把，勿写入仓库）：
+
+  a. 只说「周末想出去」→ collect，追问，无 JSON
+  b. 「上海杨浦骑行 2 小时看老厂房，但只要步行」→ 指出矛盾，不生成
+  c. 槽位齐的完整偏好 → generate，有 json 围栏，预览出现，地图仍空
+  d. 点确认路线 → 地图打点画线，再点加载不应叠加
+  e. 点重新生成 → 新预览，未确认则地图仍是上一条已确认结果
+  f. 「把路线改短一点」→ revise，新 JSON
+  g. 故意让模型废话（可临时改 prompt 测）→ 解析失败提示
+  h. 非法坐标（可本地 mock）→ 不渲染
+  i. 断网或把函数超时打小 → 友好错误
+  j. 同一 IP 快速超过 30 次 → 429（可用脚本，勿把 200 次打满到影响用户，测全站限额用计数器读数或小配额 staging）
+
+
+11. 验收
+--------
+- 存在 git tag v1.1.0，与本文档编号一致，README 写了如何回滚
+- GitHub 公开仓有 1.1.0 代码
+- Vercel 公网 URL 未登录可打开
+- 仓库内搜不到用户提供的那串 Key
+- 生产对话走 Edge /api/chat，不填 Key 也能走站长 Env（在限额内）
+- 三态、闸门、解析、清图层、错误提示均符合第 4～9 节
+- 限流键在 KV 中可查，不是仅内存
+
+
+12. 不要做
+----------
+- 把 Key 写进 1.1.0.txt 或任何会进 Git 的文件
+- 不打 tag 就声称 1.1.0 已发布
+- force push main
+- collect 阶段接受 JSON 并画图
+- 跳过确认路线
+- 内存限流冒充 30/200 跨实例限额
+
+
+13. 执行顺序
+------------
+1. Edge /api/health、/api/chat + KV 限流
+2. 前端三态、intent、解析、闸门、地图 clear、错误文案
+3. 本地用 .env 联调第 10 节 a～i
+4. commit（无 Key）→ tag v1.1.0 → push GitHub → Vercel 部署
+5. 请用户在 Vercel 粘贴 DEEPSEEK_API_KEY（若实现 Agent 已有用户当面提供的 Key，只写入 Vercel Env，不要出现在 commit diff）
+6. 公网再走一遍 a～f，把 GitHub URL、Vercel URL、tag 名回复用户
