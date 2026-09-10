@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>轻漫游</title>
+    <meta name="description" content="对话式家门口短途漫游灵感探索器" />
+    <meta name="theme-color" content="#f2f2f7" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./css/app.css?v=1.1.0" />
+  </head>
+  <body>
+    <div id="map" aria-label="漫游地图"></div>
+
+    <div id="map-controls" aria-label="地图控件">
+      <button type="button" id="btn-locate" aria-label="定位到我">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0-6.5.75 3.04a7.75 7.75 0 0 1 6.71 6.71L22.5 12l-3.04.75a7.75 7.75 0 0 1-6.71 6.71L12 22.5l-.75-3.04a7.75 7.75 0 0 1-6.71-6.71L1.5 12l3.04-.75a7.75 7.75 0 0 1 6.71-6.71L12 1.5Z"
+          />
+        </svg>
+      </button>
+      <button type="button" id="btn-zoom-in" aria-label="放大">+</button>
+      <button type="button" id="btn-zoom-out" aria-label="缩小">−</button>
+    </div>
+
+    <aside id="sheet" aria-label="对话抽屉" data-snap="half">
+      <button type="button" id="sheet-handle" aria-label="拖拽调整对话高度"></button>
+
+      <header class="sheet-head">
+        <h1>轻漫游</h1>
+        <button type="button" id="btn-gear" aria-label="API Key 设置">设置</button>
+      </header>
+
+      <div id="sheet-messages"></div>
+
+      <div id="key-panel" hidden>
+        <p class="key-lead">公网 Demo 默认用服务端模型（有每日限额）。也可选填你自己的 DeepSeek Key，只留在这次内存，刷新即丢失。</p>
+        <label>
+          API Key
+          <input id="key-input" type="password" autocomplete="off" placeholder="sk-..." />
+        </label>
+        <label>
+          模型
+          <input id="model-input" type="text" value="deepseek-chat" />
+        </label>
+        <div class="key-actions">
+          <button type="button" id="key-save">保存到内存</button>
+          <button type="button" id="key-clear" class="text-btn">清除</button>
+          <button type="button" id="key-close" class="text-btn">关闭</button>
+        </div>
+      </div>
+
+      <div id="plus-menu" hidden>
+        <button type="button" data-act="sample">加载示例路线</button>
+        <button type="button" data-act="key">API Key 设置</button>
+      </div>
+
+      <form id="composer">
+        <button type="button" id="btn-plus" aria-label="更多">+</button>
+        <textarea id="prompt" rows="1" placeholder="说说你想怎么逛…" autocomplete="off"></textarea>
+        <button type="submit" id="send" aria-label="发送" disabled>
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path fill="currentColor" d="M12 4 5.5 14h4.2v6h4.6v-6h4.2L12 4Z" />
+          </svg>
+        </button>
+      </form>
+    </aside>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script type="module" src="./js/app.js?v=1.1.0"></script>
+  </body>
+</html>
